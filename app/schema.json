@@ -1,0 +1,29 @@
+{
+  "Directive": {
+    "node_type": "Directive",
+    "properties": {
+      "name": "string",
+      "value": "string"
+    }
+  },
+  "Section": {
+    "node_type": "Section",
+    "properties": {
+      "name": "string",
+      "directives": "array"
+    }
+  },
+  "Comment": {
+    "node_type": "Comment",
+    "properties": {
+      "content": "string"
+    }
+  },
+  "Include": {
+    "node_type": "Include",
+    "properties": {
+      "file_path": "string"
+    }
+  }
+}
+
