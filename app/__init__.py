@@ -5,26 +5,16 @@ import matplotlib.pyplot as plt
 from urllib.parse import urlparse
 
 server_variables = {
-        'CONTEXT_PREFIX': None,
-        'CONTEXT_DOCUMENT_ROOT': None,
-        'DOCUMENT_ROOT': None,
-        'SCRIPT_FILENAME': None,
-        'SCRIPT_GROUP': None,
-        'SCRIPT_USER': None,
-        'SERVER_ADDR': None,
-        'SERVER_ADMIN': None,
-        'SERVER_NAME': None,
-        'SERVER_PORT': None,
-        'SERVER_PROTOCOL': None,
-        'SERVER_SOFTWARE': None
-        }
+    "QUERY_STRING": {"get": lambda x: urlparse(x).query},
+}
+
+backreferences = {}
+
+
 def parse_httpd_config(config_file_path):
     # Regular expressions for matching RewriteRule and RewriteCond directives
-    # rule_pattern = r"RewriteRule\s+(.+?)\s+(.+?)\s+(\[.*?\])"
     rule_pattern = re.compile(r"RewriteRule\s+(.+?)\s+(.+?)(?:\s*\[(.*?)\])?\s*$")
     cond_pattern = re.compile(r"RewriteCond\s+(.+?)\s+(.+?)(?:\s*\[(.*?)\])?\s*$")
-
-    # cond_pattern = r"RewriteCond\s+(.+)"
 
     # Initialize graph and node attribute index
     graph = nx.DiGraph()
@@ -77,21 +67,29 @@ def parse_httpd_config(config_file_path):
     return graph
 
 
-def simulate_request_flow(graph: nx.DiGraph, request_uri: str):
+def simulate_request_flow(graph: nx.DiGraph, uri: str):
+    print(f"Simulating request to {uri}")
     rewrite_rules = []
     rule_to_conds = {}
+    current_uri = uri
     for node_index in graph.nodes():
         node_data = graph.nodes[node_index]
         node_type = node_data["type"]
         if node_type == "Rule":
             rewrite_rules.append(
-                (node_data["source"], node_data["target"], node_data["flags"])
+                (
+                    node_index,
+                    node_data["source"],
+                    node_data["target"],
+                    node_data["flags"],
+                )
             )
             predecessors = list(graph.predecessors(node_index))
             if predecessors:
                 rule_to_conds.setdefault(node_index, []).append(*predecessors)
-    for index, rule in enumerate(rewrite_rules):
-        conds = rule_to_conds.get(index, [])
+
+    for rule in rewrite_rules:
+        conds = rule_to_conds.get(rule[0], [])
         corresponding_conds = []
         for cond in conds:
             corresponding_cond = graph.nodes[cond]
@@ -102,32 +100,77 @@ def simulate_request_flow(graph: nx.DiGraph, request_uri: str):
                     corresponding_cond["flags"],
                 )
             )
-        # print(rewrite_engine(rule, teststring_conds, request_uri))
+        current_uri = rewrite_engine(rule, corresponding_conds, current_uri)
 
 
-def rewrite_engine(rule: Tuple, conditions: List[Tuple], request_uri: str):
-    path = get_uri_segments(request_uri).path
-    rule_pattern = rule[0]
+def rewrite_engine(rule: List, conditions: List[Tuple], uri: str):
+    request = get_uri_segments(uri)
+    path = request.path
+    rule_pattern = rule[1]
+    target = rule[2]
+    print(
+        f"Evaluating RewriteRule {rule_pattern} against {path} with conditions {conditions}"
+    )
     rule_pattern_match = re.match(rule_pattern, path)
+    url_changed = False
+    cond_backreferences = {}
+    rule_backreferences = {}
     if rule_pattern_match:
+        # create rule backreferences
+        for i, val in enumerate(rule_pattern_match.groups(), start=1):
+            rule_backreferences[str(i)] = val
+        # Corresponding rule conditions must be evaluated before transformation
         for condition in conditions:
             teststring = condition[0]
             pattern = condition[1]
-            transform_url = True if validate_condition(teststring, pattern) else False
-            # request uri substitution
-        # Coressponding rule conditions must be evaluated before transformaiton
-        pass
-    else:
-        return request_uri
+            url_changed, cond_backreferences = validate_condition(
+                teststring, pattern, uri
+            )
+            if url_changed:
+                continue
+            else:
+                break
+
+    if url_changed:
+        # Distinguish between external and internal redirect
+        path = request.path
+        print(f"Rewriting {rule_pattern} to {target}")
+        path = re.sub(rule_pattern, target, path)
+        if cond_backreferences:
+            for key, value in cond_backreferences.items():
+                path = path.replace("%" + key, value)
+        if rule_backreferences:
+            for key, value in rule_backreferences.items():
+                path = path.replace("$" + key, value)
+        request = request._replace(path=path)
+        print(f"Url transfomed to {path}")
+        # request = request._replace(path=rule[2])
+    # else:
+    request = request.geturl()
+    return request
 
 
 def get_uri_segments(request_uri: str):
     return urlparse(request_uri)
 
 
-def validate_condition(teststring: str, condition: str) -> bool:
+def validate_condition(teststring: str, condition: str, request_uri) -> Tuple:
     # Teststring value has to be determined - it is usually some sort of variable (apache variable or user variable)
+    teststring = expand_variable(teststring)
+    print(f"Validating {teststring} meets condition {condition}")
+    if teststring in server_variables:
+        teststring = server_variables[teststring]["get"](request_uri)
     condition_matched = re.match(condition, teststring)
-    return True if condition_matched else False
+    if condition_matched:
+        for i, val in enumerate(condition_matched.groups(), start=1):
+            backreferences[str(i)] = val
+        return True, backreferences
+    else:
+        return False, None
 
-def set_server_variables(line: str)
+
+def expand_variable(var: str) -> str:
+    var_pattern = re.compile(r"%{([^}]+)}")
+    print(f"Evaluating variable for expansion: {var}")
+    var_found = var_pattern.match(var)
+    return var_found.group(1) if var_found else var
