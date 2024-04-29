@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "apache-play"
+name = "koshon"
 version = "0.1.0"
 description = ""
 authors = ["dannyolamide <dannyolamide@gmail.com>"]
@@ -10,6 +10,7 @@ packages = [{include = "app"}]
 python = "^3.12"
 termcolor = "^2.4.0"
 streamlit = "^1.33.0"
+matplotlib = "^3.8.4"
 
 
 [build-system]
